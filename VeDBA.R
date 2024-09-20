@@ -6,7 +6,7 @@ library(dplyr)
 
 df=read.csv("D:/ACC/10274_samples.csv")
 
-#Calculate dynamic body acceleration (DBA) by row for each x,y,and z measurment 
+#Calculate dynamic body acceleration (DBA) by row for each x,y,and z measurement 
 df$ax=df$acceleration.x-df$acc.xmean
 df$ay=df$acceleration.y-df$acc.ymean 
 df$az=df$acceleration.z-df$acc.zmean
