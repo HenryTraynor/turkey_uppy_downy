@@ -1,6 +1,6 @@
 require(readr)
 
-df<- read_csv("Data/11197_2.csv")
+df<- read_csv("11197_2.csv")
 
 # Load required libraries
 library(dplyr)
