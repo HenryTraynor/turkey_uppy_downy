@@ -61,6 +61,7 @@ library(plyr)
 library(data.table)
 library(dplyr)
 library(lubridate)
+library(ggplot2)
 #Calculate rolling mean of acc for DBA calculation
 window_length=40
 df$x_mean=append(rollmean(expanded_df$x_axis, window_length, align="left"), replicate(window_length-1, NA))
@@ -94,12 +95,11 @@ df$log_avg_VeDBA=log(df$AVG_VeDBA)
 
 #Concatenate Times
 df$DateTime = paste(df$Date, df$Time)
-df$dt = dmy_hms(df$DateTime, tz="GMT")
-
-plot(df$dt, df$AVG_VeDBA)
+df$dt = mdy_hms(df$DateTime, tz="GMT")
+df$dt = df$dt - hours(5)
 
 #Calculate rolling median of the log VeDBA for 10 minute window
-calculate_rolling_median <- function(column, window_size = 200) {
+calculate_rolling_median <- function(column, window_size = 400) {
   sapply(seq_along(column), function(i) {
     start <- floor((i - 1) / window_size) * window_size + 1
     end <- min(start + window_size - 1, length(column))
@@ -116,7 +116,7 @@ df=df%>%
 df=df%>%
   mutate(median_VeDBA=calculate_rolling_median(AVG_VeDBA))
 
-#plot(df$dt, df$median_VeDBA)
+ggplot(data=df, aes(x=dt,y=median_VeDBA)) + geom_line()
 ```
 
 ```{r VeDBA visualization}
