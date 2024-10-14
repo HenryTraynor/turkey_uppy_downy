@@ -116,11 +116,5 @@ df=df%>%
 df=df%>%
   mutate(median_VeDBA=calculate_rolling_median(AVG_VeDBA))
 
-ggplot(data=df, aes(x=dt,y=median_VeDBA)) + geom_line()
-```
-
-```{r VeDBA visualization}
-library(ggplot2)
-library(dplyr)
-ggplot(data=df, aes(x=DateTime, y=median_VeDBA)) + geom_line()
+ggplot(data=df, aes(x=dt,y=AVG_VeDBA)) + geom_line()
 ```
