@@ -115,6 +115,10 @@ df=df%>%
 #Calculate rolling median of the avg VeDBA for 6 minute window
 df=df%>%
   mutate(median_VeDBA=calculate_rolling_median(AVG_VeDBA))
+```
 
-ggplot(data=df, aes(x=dt,y=AVG_VeDBA)) + geom_line()
+```{r Rolling Interval Statistics}
+source("intervalAnalysis.R")
+
+stat <- intervalAnalysis(df, "mean", "z_axis", 200, 10)
 ```
