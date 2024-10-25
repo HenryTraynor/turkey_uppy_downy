@@ -1,0 +1,368 @@
+#####Running Multiple Turkeys across the same date range
+###Initializing
+  #------------------------------
+  #Libraries and Dfs
+  #----------------------------
+  
+  library(tidyverse)
+  require(readr)
+  library(ggplot2)
+  library(dplyr)
+  library(zoo)
+  MG1<- read_csv("C:/Users/aa04991/Downloads/13921.csv")
+  MG2<- read_csv("C:/Users/aa04991/Downloads/13920.csv")
+  MG3<- read_csv("C:/Users/aa04991/Downloads/13919.csv")
+  MG4<- read_csv("C:/Users/aa04991/Downloads/13918.csv")
+  MG5<- read_csv("C:/Users/aa04991/Downloads/13917.csv")
+  
+  #---------------------------
+  #Limiting Dates
+  #-----------------------------
+  
+  shrink <- function (x) {
+  start_date <- ymd_hms("2024-02-26 05:16:00")
+  end_date <- ymd_hms("2024-05-15 12:00:00")
+  
+  x <- subset(x, timestamp >= start_date & timestamp <= end_date)
+  return(x)}
+  
+  shrink(MG1) -> MG1
+  shrink(MG2) -> MG2
+  shrink(MG3) -> MG3
+  shrink(MG4) -> MG4
+  shrink(MG5) -> MG5
+  
+  #-------------------
+  #Reformat columns (to match splitting code)
+  #-------------------------
+  retime <- function(data) {
+    data$Month = format(as.POSIXct(data$timestamp), '%m')
+    data$Day = format(as.POSIXct(data$timestamp), '%d')
+    data$Year = format(as.POSIXct(data$timestamp), '%Y')
+    data$Date = format(as.POSIXct(data$timestamp), '%Y-%m-%d')
+    data$Time = format(as.POSIXct(data$timestamp), '%H:%M:%S')
+  return(data)}
+  
+  retime(MG1) -> MG1
+  retime(MG2) -> MG2
+  retime(MG3) -> MG3
+  retime(MG4) -> MG4
+  retime(MG5) -> MG5
+  
+  
+  rnm <- function (dataf) {
+  dataf <-dataf %>% 
+    rename(ID= `individual-local-identifier`, accel=`eobs:accelerations-raw`)
+  return(dataf)
+  }
+  
+  rnm(MG1) -> MG1
+  rnm(MG2) -> MG2
+  rnm(MG3) -> MG3
+  rnm(MG4) -> MG4
+  rnm(MG5) -> MG5
+##############
+  
+#------------------------------------
+##Unzip acceleration vector
+#------------------------------------
+
+  
+unzip <- function (data) {
+  
+  # Function to split 'accel' column into groups of three values (x, y, z axes)
+  split_accel_data <- function(accel_col) {
+    accel_values <- unlist(strsplit(accel_col, " "))
+    matrix(accel_values, ncol = 3, byrow = TRUE)
+  }
+  
+  # Initialize an empty dataframe to store the expanded data
+  expanded_data <- data.frame()
+  
+  # Iterate through each row in the dataframe
+  for (i in 1:nrow(data)) {
+    # Split accel column into x, y, z values
+    accel_matrix <- split_accel_data(data$accel[i])
+    
+    # Create a temporary dataframe for the current row, repeating the timestamp, date, year, and tag-local-identifier for each sample
+    temp_data <- data.frame(
+      Time = rep(data$Time[i], nrow(accel_matrix)),
+      Date = rep(data$Date[i], nrow(accel_matrix)),
+      Year = rep(data$Year[i], nrow(accel_matrix)),
+      ID = rep(data$ID[i], nrow(accel_matrix)),
+      sample_num = 1:nrow(accel_matrix),  # Add a sample number for each sample
+      x_axis = accel_matrix[, 1],
+      y_axis = accel_matrix[, 2],
+      z_axis = accel_matrix[, 3]
+    )
+    
+    # Append the temporary dataframe to the expanded dataframe
+    expanded_data <- rbind(expanded_data, temp_data)
+  }
+  expanded_data$x_axis=as.numeric(expanded_data$x_axis)
+  expanded_data$y_axis=as.numeric(expanded_data$y_axis)
+  expanded_data$z_axis=as.numeric(expanded_data$z_axis)
+  
+  
+  return(expanded_data)
+}
+  
+Trk1 <- unzip(MG1)
+Trk2 <- unzip(MG2)
+Trk3 <- unzip(MG3)
+Trk4 <- unzip(MG4)
+Trk5 <- unzip(MG5)
+
+#-------------------------
+#VeBDA ---still working on getting this to funciton proper
+#----------------------------
+
+VeBDA_Prep <- function (df) {
+  #Calculate rolling mean of acc for DBA calculation
+  window_length=40
+  df$x_mean=append(rollmean(expanded_df$x_axis, window_length, align="left"), replicate(window_length-1, NA))
+  df$y_mean=append(rollmean(expanded_df$y_axis, window_length, align="left"), replicate(window_length-1, NA))
+  df$z_mean=append(rollmean(expanded_df$z_axis, window_length, align="left"), replicate(window_length-1, NA))
+  
+  #Calculate dynamic body acceleration (DBA) by row for each x,y,and z measurement 
+  df$ax=df$x_axis-df$x_mean
+  df$ay=df$y_axis-df$y_mean
+  df$az=df$z_axis-df$z_mean
+  
+  #Add up all the absolute values of DBA to get OBDA for each row 
+  df$odba=(abs(df$ax)+abs(df$ay)+abs(df$az)) 
+  
+  # Calculate VeDBA by row
+  df$VeDBA=sqrt(df$ax^2+df$ay^2+df$az^2)
+  
+  #Calculate log of average VeDBA for each burst
+  calculate_rolling_average <- function(column, window_size = 40) {
+    sapply(seq_along(column), function(i) {
+      start <- floor((i - 1) / window_size) * window_size + 1
+      end <- min(start + window_size - 1, length(column))
+      mean(column[start:end])
+    })
+  }
+  
+  
+  df=df%>%
+    mutate(AVG_VeDBA=calculate_rolling_average(VeDBA))
+  
+  df$log_avg_VeDBA=log(df$AVG_VeDBA)
+  return(df)
+}
+VeBDA_Prep(Trk1) -> Trk1
+
+
+
+######
+#END PREPARATION
+  #Now 5 individuals across the same range are in environment, manuipulations below
+##########
+
+#-----------------
+#Combine data to plot
+#------------------
+bind_cols(Trk1[1:294000,],Trk2[1:294000,4:8],Trk3[1:294000,4:8],Trk4[1:294000,4:8],Trk5[1:294000,4:8]) -> all_turkeys
+
+all_turkeys$DateTime = paste(all_turkeys$Date, all_turkeys$Time)
+all_turkeys$DT = ymd_hms(all_turkeys$DateTime,tz="GMT")
+all_turkeys$DateTime <- NULL
+
+
+
+#Rename axis columns
+colnames(all_turkeys)
+
+#Z-axis
+all_turkeys %>% rename(z1 = 'z_axis...8') -> all_turkeys
+all_turkeys %>% rename(z2 = 'z_axis...13') -> all_turkeys
+all_turkeys %>% rename(z3 = 'z_axis...18') -> all_turkeys
+all_turkeys %>% rename(z4 = 'z_axis...23') -> all_turkeys
+all_turkeys %>% rename(z5 = 'z_axis...28') -> all_turkeys
+
+#y-axis
+all_turkeys %>% rename(y1 = 'y_axis...7') -> all_turkeys
+all_turkeys %>% rename(y2 = 'y_axis...12') -> all_turkeys
+all_turkeys %>% rename(y3 = 'y_axis...17') -> all_turkeys
+all_turkeys %>% rename(y4 = 'y_axis...22') -> all_turkeys
+all_turkeys %>% rename(y5 = 'y_axis...27') -> all_turkeys
+
+#x-axis
+all_turkeys %>% rename(x1 = 'x_axis...6') -> all_turkeys
+all_turkeys %>% rename(x2 = 'x_axis...11') -> all_turkeys
+all_turkeys %>% rename(x3 = 'x_axis...16') -> all_turkeys
+all_turkeys %>% rename(x4 = 'x_axis...21') -> all_turkeys
+all_turkeys %>% rename(x5 = 'x_axis...26') -> all_turkeys
+
+
+#----------------
+#Visualize
+#-----------------
+#Shorten amount of data
+start_obs <- ymd_hms("2024-03-01 09:00:00")
+end_obs <- ymd_hms("2024-03-02 03:59:00")
+
+less_days <- subset(all_turkeys, DT >= start_obs & DT <= end_obs)
+
+
+ggplot(less_days, aes(x = DT), "Time") +
+  geom_line(aes(y = z1), color = 'skyblue3') +
+  geom_line(aes(y = z2), color = 'tomato') +
+  geom_line(aes(y = z3), color = 'forestgreen') +
+  geom_line(aes(y = z4), color = 'yellow2') +
+  geom_line(aes(y = z5), color = 'black') 
+
+
+#---------------------------
+#Finding some reference values
+#----------------------------------
+#z-axis 
+    #mean = 1577.149
+    #40%  = 1547
+    #75%  = 1578  
+#x-axis mean  2018.283
+#y-axis mean - 2021.401
+
+
+z_axis <- c(less_days$z1, less_days$z2, less_days$z3, less_days$z4, less_days$z5)
+y_axis <- c(less_days$y1, less_days$y2, less_days$y3, less_days$y4, less_days$y5)
+x_axis <- c(less_days$x1, less_days$x2, less_days$x3, less_days$x4, less_days$x5)
+
+mean(z_axis)
+quantile(z_axis, .75)
+quantile(z_axis, .25)
+
+
+ggplot(less_days, aes(x = DT), "Time") +
+  geom_line(aes(y = z1), color = 'skyblue3') +
+  geom_line(aes(y = z2), color = 'tomato') +
+  geom_line(aes(y = z3), color = 'forestgreen') +
+  geom_line(aes(y = z4), color = 'yellow2') +
+  geom_line(aes(y = z5), color = 'black') +
+  geom_line(aes(y=1537), color = 'purple')+
+  geom_line(aes(y=1578), color = 'purple')+
+  coord_cartesian(ylim=c(1250, 2000))
+
+  
+  
+#----------------
+#Looking a bit closer
+#-----------------
+#Shorten amount of data
+start_obs2 <- ymd_hms("2024-03-01 12:00:00")
+end_obs2 <- ymd_hms("2024-03-01 13:00:00")
+
+less_days <- subset(all_turkeys, DT >= start_obs2 & DT <= end_obs2)
+
+
+ggplot(closer_look, aes(x = DT), "Time") +
+  geom_line(aes(y = z1), color = 'skyblue3') +
+  geom_line(aes(y = z2), color = 'tomato') +
+  geom_line(aes(y = z3), color = 'forestgreen') +
+  geom_line(aes(y = z4), color = 'yellow2') +
+  geom_line(aes(y = z5), color = 'black') 
+
+#------------------------
+#Mean for each burst
+#----------------
+
+condense_burst <- function(column, window_size = 40) {
+  sapply(seq_along(column), function(i) {
+    start <- floor((i - 1) / window_size) * window_size + 1
+    end <- min(start + window_size - 1, length(column))
+    mean(column[start:end])
+  })
+}
+all_turkeys=all_turkeys%>%
+  mutate(z1_avg=condense_burst(z1))
+all_turkeys=all_turkeys%>%
+  mutate(z2_avg=condense_burst(z2))
+all_turkeys=all_turkeys%>%
+  mutate(z3_avg=condense_burst(z3))
+all_turkeys=all_turkeys%>%
+  mutate(z4_avg=condense_burst(z4))
+all_turkeys=all_turkeys%>%
+  mutate(z5_avg=condense_burst(z5))
+
+
+ggplot(less_days, aes(x = DT), "Time") +
+  geom_line(aes(y = z1_avg), color = 'skyblue3') +
+  geom_line(aes(y = z2_avg), color = 'tomato') +
+  geom_line(aes(y = z3_avg), color = 'forestgreen') +
+  geom_line(aes(y = z4_avg), color = 'yellow2') +
+  geom_line(aes(y = z5_avg), color = 'black') +
+  geom_line(aes(y=1537), color = 'purple')+
+  geom_line(aes(y=1578), color = 'purple')
+
+
+#----------------------------
+#Lets try something
+#------------------------------
+
+#try 1
+Mean10 <- function(i) with(less_days, mean(z1_avg[DT <= DT[i] & DT >= DT[i] - 5]))
+cbind(less_days, mean = sapply(1:nrow(less_days), Mean10)) ->less_days_trial
+ggplot(less_days_trial, aes(x = DT)) +
+  geom_line(aes(y = mean), color = 'skyblue3') +
+  scale_x_datetime(breaks="15 mins", minor_breaks="1 min")
+
+#manipulating existing function
+roll_mean <- function(column, window_size = 240) {
+  sapply(seq_along(column), function(i) {
+    start <- floor((i - 1) / window_size) * window_size + 1
+    end <- min(start + window_size - 1, length(column))
+    mean(column[start:end])
+  })
+}
+less_days=less_days%>%
+    mutate(trial=roll_mean(z4))
+
+ggplot(less_days, aes(x = DT)) +
+  geom_line(aes(y = trial), color = 'skyblue3') +
+  scale_x_datetime(breaks="15 mins", minor_breaks="1 min")
+
+##This works better, but window size is still off; figure it out later.
+
+##Going bigger
+
+all_turkeys= all_turkeys%>%
+  mutate(rollz5=roll_mean(z5))
+all_turkeys= all_turkeys%>%
+  mutate(rollz4=roll_mean(z4))
+all_turkeys= all_turkeys%>%
+  mutate(rollz3=roll_mean(z3))
+all_turkeys= all_turkeys%>%
+  mutate(rollz2=roll_mean(z2))
+all_turkeys= all_turkeys%>%
+  mutate(rollz1=roll_mean(z1))
+all_turkeys$trial = NULL
+####back to original visualization
+
+start_obs <- ymd_hms("2024-05-01 00:00:00")
+end_obs <- ymd_hms("2024-05-02 23:59:00")
+
+less_days <- subset(all_turkeys, DT >= start_obs & DT <= end_obs)
+
+
+ggplot(less_days, aes(x = DT), "Time") +
+  geom_line(aes(y = rollz1), color = 'skyblue3') +
+  geom_line(aes(y = rollz2), color = 'tomato') +
+  geom_line(aes(y = rollz3), color = 'forestgreen') +
+  geom_line(aes(y = rollz4), color = 'yellow2') +
+  geom_line(aes(y = rollz5), color = 'black') +
+  geom_line(aes(y=1537), color = 'purple')+
+  geom_line(aes(y=1578), color = 'purple')
+
+##NOW with a function 
+
+terminate()
+
+
+Trial2=data.frame(ifelse(less_days$rollz4>=1560,"awake","sleep"))
+bind_cols(Trial2, less_days) -> Trial3
+Trial3 <- Trial3 %>% rename(status='ifelse.less_days.rollz4....1560...awake....sleep..') 
+
+ggplot(Trial3) +
+  geom_point(aes(x=DT, y=status))
+  geom point(x=)
