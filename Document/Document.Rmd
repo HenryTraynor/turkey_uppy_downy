@@ -16,6 +16,7 @@ df<- read_csv("../Data/11197_2.csv")
 ```
 
 ```{r Acceleration Expansion}
+library(dplyr)
 #change name of columns
 df<-df%>% rename(ID =`individual-local-identifier`, accel=`eobs:accelerations-raw`)
 
@@ -117,8 +118,60 @@ df=df%>%
   mutate(median_VeDBA=calculate_rolling_median(AVG_VeDBA))
 ```
 
-```{r Rolling Interval Statistics}
-source("intervalAnalysis.R")
+```{r Averaging Raw Values}
+#Pull out raw values and average over each recorded burst
+df.raw <- data.frame(
+  ID = df$ID,
+  x_axis = df$x_axis,
+  y_axis = df$y_axis,
+  z_axis = df$z_axis,
+  dt = df$dt
+)
 
-stat <- intervalAnalysis(df, "mean", "z_axis", 200, 10)
+condense_burst <- function(column, window_size = 40) {
+  sapply(seq_along(column), function(i) {
+    start <- floor((i - 1) / window_size) * window_size + 1
+    end <- min(start + window_size - 1, length(column))
+    mean(column[start:end])
+  })
+}
+
+df.raw=df.raw%>%
+  mutate(x_avg=condense_burst(x_axis))
+df.raw=df.raw%>%
+  mutate(y_avg=condense_burst(y_axis))
+df.raw=df.raw%>%
+  mutate(z_avg=condense_burst(z_axis))
+
+df.raw <- df.raw %>% distinct(dt, .keep_all=TRUE)
+df.avg <- df.raw %>%
+  select("ID", "dt", "x_avg", "y_avg", "z_avg")
+
+```
+
+```{r Rolling Interval Statistics}
+library(zoo)
+library(moments)
+intervalAnalysis <- function(df.sample, fun.call, dataCol, windowLength, windowStep) {
+  colNum = which(colnames(df.sample)==dataCol)
+  #calculation of statistic values
+  stat <- rollapply(df.sample[,colNum],
+                    FUN=fun.call,
+                    width=windowLength,
+                    by = windowStep,
+                    by.column = TRUE,
+                    align = "right")
+  
+  timestamp <- seq(from=df.sample$dt[windowLength], to=df.sample$dt[nrow(df.sample)], length.out=length(stat))
+  #combining stat values with time indices
+  df.stat <- data.frame(timestamp,stat)
+  
+  return(df.stat)
+}
+
+library(goeveg)
+
+df.stat <- intervalAnalysis(df.avg, "cv", "z_avg", 15, 1)
+
+ggplot(data=df.stat, aes(x=timestamp, y=stat)) + geom_line() + ylab("Coeffecient of Variation") + xlab("Time")
 ```
