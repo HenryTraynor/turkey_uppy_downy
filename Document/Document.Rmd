@@ -149,22 +149,25 @@ df.raw <- df.raw %>% distinct(dt, .keep_all=TRUE)
 df.avg <- df.raw %>%
   select("ID", "dt", "x_avg", "y_avg", "z_avg")
 
+ggplot(data=df.avg, aes(x=dt, y=z_avg)) + geom_line()
+ggplot(data=df.raw, aes(x=dt, y=z_avg)) + geom_line()
 ```
 
 ```{r Rolling Interval Statistics}
 library(zoo)
 library(moments)
+
 intervalAnalysis <- function(df.sample, fun.call, dataCol, windowLength, windowStep) {
   colNum = which(colnames(df.sample)==dataCol)
   #calculation of statistic values
   stat <- rollapply(df.sample[,colNum],
-                    FUN=fun.call,
-                    width=windowLength,
-                    by = windowStep,
-                    by.column = TRUE,
-                    align = "right")
+                      FUN=fun.call,
+                      width=windowLength,
+                      by=windowStep,
+                      by.column = TRUE,
+                      align = "center")
   
-  timestamp <- seq(from=df.sample$dt[windowLength], to=df.sample$dt[nrow(df.sample)], length.out=length(stat))
+  timestamp <- seq(from=df.sample$dt[1], to=df.sample$dt[nrow(df.sample)-windowLength], length.out=length(stat))
   #combining stat values with time indices
   df.stat <- data.frame(timestamp,stat)
   
@@ -172,8 +175,96 @@ intervalAnalysis <- function(df.sample, fun.call, dataCol, windowLength, windowS
 }
 
 library(goeveg)
+library(ggplot2)
 
-df.stat <- intervalAnalysis(df.avg, "cv", "z_avg", 15, 1)
+stats <- c("cv",
+           "mean",
+           "sd")
 
-ggplot(data=df.stat, aes(x=timestamp, y=stat)) + geom_line() + ylab("Coeffecient of Variation") + xlab("Time")
+timeParms <- c(window=20, step=1)
+
+statsList <- list()
+for(stat in stats) {
+  statsList = append(statsList, list(intervalAnalysis(df.avg, stat, "z_avg", timeParms[1], timeParms[2])))
+}
+
+statsPlot <- list()
+for(i in 1:length(statsList)) {
+  p <- ggplot(data=statsList[[i]], aes(x=timestamp, y=stat)) + geom_line() + ylab(stats[i]) + xlab("Time")
+  statsPlot <- append(statsPlot, list(p))
+}
+
+library(ggpubr)
+ggarrange(statsPlot[[1]],
+          statsPlot[[2]],
+          statsPlot[[3]])
+
+statsPlot[[2]]
+```
+
+```{r Avg Slope Interval}
+avgSlope <- function(x) {
+  return((x[length(x)] - x[1]) / length(x))
+}
+
+df_smooth_avg <- statsList[[2]]
+colnames(df_smooth_avg) <- c("dt", "stat")
+
+avg_slope <- intervalAnalysis(df.avg,
+                              avgSlope,
+                              "z_avg",
+                              windowLength=15, 
+                              windowStep=2)
+
+colnames(avg_slope) <- c("dt", "stat")
+
+ggplot(data=avg_slope, aes(x=dt,y=stat)) +geom_line()
+
+var_avg_slope <- intervalAnalysis(avg_slope,
+                             var,
+                             "stat",
+                             windowLength=10,
+                             windowStep=1)
+
+ggplot(data=var_avg_slope, aes(x=timestamp, y=stat)) + geom_line() + ylab("SD Average Slope") + xlab("Time") +
+  geom_hline(yintercept=7)
+
+colnames(var_avg_slope) <- c("dt", "stat")
+
+sd_var_avg_slope <- intervalAnalysis(var_avg_slope,
+                                     sd,
+                                     "stat",
+                                     windowLength=10,
+                                     windowStep=1)
+colnames(sd_var_avg_slope) <- c("dt", "stat")
+
+ggplot(data=sd_var_avg_slope, aes(x=dt, y=stat)) + geom_line() + geom_hline(yintercept=2.0)
+```
+
+
+```{r Thresholds}
+library(dplyr)
+
+c <-  7.0 #medianCalc(var_avg_slope$stat,propDaylight1)  #threshold value (critical value)
+
+colnames(var_avg_slope) <- c("dt", "stat")
+
+temp <- var_avg_slope %>% mutate(across(dt, ~ as.Date(., format("%m/%d/%Y"), tz="GMT")))
+var_avg_slope$day <- temp$dt
+
+var_avg_slope$distC <- var_avg_slope$stat-c
+
+zero_dist <- vector("numeric")
+
+for(i in 1:(length(var_avg_slope$distC)-1)) {
+  if(var_avg_slope$distC[i]<0 & var_avg_slope$distC[i+1]>0) {
+    zero_dist <- rbind(zero_dist, c(i))
+  }
+}
+
+var_avg_slope$dt[zero_dist[1]]
+var_avg_slope$dt[zero_dist[length(zero_dist)]]
+
+ggplot(data=var_avg_slope, aes(x=dt, y=stat)) + geom_line() + ylab("SD Average Slope") + xlab("Time") + geom_vline(xintercept=var_avg_slope$dt[zero_dist[1]])
+
 ```
