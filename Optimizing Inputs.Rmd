@@ -1,0 +1,247 @@
+## Optimize Thresholds
+```{r}
+library(ggforce)
+library(reshape2)
+```
+
+### Day 1
+#### Window maximaizing
+
+#### First step/window
+##### Create and Run a loop
+```{r, Window Optimizing Function}
+windowoptim <- function (data, var1, var2) {
+    
+step1 <- intervalAnalysis(data,
+                              slope,
+                              "z_avg",
+                              windowLength=var1, 
+                              windowStep=var2)
+step1 <- step1 %>% 
+  rename(dt = timestamp, slope = stat)
+
+step2 <- intervalAnalysis(step1,
+                              var,
+                              "slope",
+                              windowLength=30, 
+                              windowStep=1)
+return (sum(step2$stat))
+}
+
+```
+
+Test the function
+```{r}
+windowoptim(day1, 20, 2)
+```
+```{r, series of values}
+
+var1.values <- seq(1, 100, by = 1)
+var2.values <- seq(1,2, by = 1)
+```
+ 
+Now we make a matrix to fit values into and run the function for every sequence of the values we are interested in. We will then visualize the two variables together as a heatmap.
+```{r, Run a loop with all values}
+windowmatrix <- matrix(NA, nrow = length(var1.values), ncol = length(var2.values))
+
+for (i in seq_along(var1.values)) {
+  for (j in seq_along(var2.values)) {
+    windowmatrix[i, j] <- windowoptim(var1 = var1.values[i], var2 = var2.values[j], data = day1)
+  }
+
+}
+```
+##### Visualize
+```{r}
+windowheat <- as.data.frame(windowmatrix)
+
+windowheat$row <- as.numeric(1:nrow(windowheat))
+
+windowheat <- melt(windowheat, id.vars = "row", variable.name = "column", value.name = "value")
+
+
+ggplot(windowheat, aes(x = (column), y = as.numeric(row), fill = value)) +
+  geom_tile() +
+  scale_fill_viridis_c() 
+```
+This shows a stark difference between the step changes at lower values, but both seem to converge in similar levels of variance at high window sizes. We also notice more significant change in the effect of the window at lower numbers. We will investigate this further in the next section. 
+
+#### First window
+Now keeping the step the same, we will visualize just the change in the window. 
+
+```{r}
+windowvar1 <- numeric(length(var1.values))
+
+for (i in seq_along(var1.values)) { 
+  windowvar1[i] <- windowoptim(data= day1, var1 = (var1.values[i]), var2=1)
+}
+plot(windowvar1)
+
+windowvar2 <- numeric(length(var1.values))
+
+for (i in seq_along(var1.values)) { 
+  windowvar2[i] <- windowoptim(data= day1, var1 = (var1.values[i]), var2=2)
+}
+plot(windowvar2)
+```
+#### Singling out night period
+
+Pull out a known night time period
+```{r}
+start_obs <- ymd_hms("2024-05-01 18:46:00")
+end_obs <- ymd_hms("2024-05-02 05:46:00")
+
+night <- subset(t918.may, dt >= start_obs & dt <= end_obs)
+```
+
+Now the same process as above, but with the night only the night period. While we want to maintain some variation overall, our goal is to minimize variation. 
+```{r}
+windowvar1 <- numeric(length(var1.values))
+
+for (i in seq_along(var1.values)) { 
+  windowvar1[i] <- windowoptim(data= night, var1 = (var1.values[i]), var2=1)
+}
+plot(windowvar1)
+
+windowvar2 <- numeric(length(var1.values))
+
+for (i in seq_along(var1.values)) { 
+  windowvar2[i] <- windowoptim(data= night, var1 = (var1.values[i]), var2=2)
+}
+plot(windowvar2)
+```
+
+Not significantly different than the overall activity.
+
+#### First Window/Second Window
+
+First we replace where the variables are being inserted, while the step is held constant. 
+##### Create and Run a Loop 
+```{r, New Window Optimizing Function}
+windowoptim <- function (data, var1, var2) {
+    
+step1 <- intervalAnalysis(data,
+                              slope,
+                              "z_avg",
+                              windowLength=var1, 
+                              windowStep=2)
+step1 <- step1 %>% 
+  rename(dt = timestamp, slope = stat)
+
+step2 <- intervalAnalysis(step1,
+                              var,
+                              "slope",
+                              windowLength=var2, 
+                              windowStep=1)
+return (sum(step2$stat))
+}
+```
+
+Then run the series of values and save the combinations to a matrix. 
+```{r, series of values}
+
+var1.values <- seq(1, 100, by = 1)
+var2.values <- seq(1,100, by = 1)
+```
+
+```{r, Run a loop with all values}
+windowmatrix2 <- matrix(NA, nrow = length(var1.values), ncol = length(var2.values))
+
+for (i in seq_along(var1.values)) {
+  for (j in seq_along(var2.values)) {
+    windowmatrix2[i, j] <- windowoptim(var1 = var1.values[i], var2 = var2.values[j], data = day1)
+  }
+
+}
+```
+
+#### Establishing Day/Night Thresholds
+##### Night 
+First we call the night data set from earlier.
+```{r}
+head(night)
+```
+
+
+we are interested in the distribution of nighttime variation. So we use a histogram to investigate these values. We utilze the 40/2 and 40/1 window/step that seems optimal based on above information and visualizations. 
+```{r}
+night.stat <- intervalAnalysis(night,
+                              slope,
+                              "z_avg",
+                              windowLength=40, 
+                              windowStep=1)
+
+
+night.slope <- day1.stat %>% 
+  rename(dt = timestamp, slope = stat)
+
+night.stat <- intervalAnalysis(night.slope,
+                              var,
+                              "slope",
+                            windowLength=40,
+                              windowStep=1)
+
+```
+
+```{r, Night Histogram}
+night.stat <- night.stat %>% 
+  mutate(transformed = stat * 10000000)
+
+width <- ((max(night.stat$transformed)-min(night.stat$transformed))/10)
+
+ggplot(night.stat, aes(x=transformed)) +
+    geom_histogram(binwidth = 0.00000001, 
+fill="#69b3a2",
+color="#e9ecef",alpha=0.9) +
+    ggtitle("Bin size = 3")
+
+```
+
+```{r}
+
+bin_width <- 2 * IQR(night.stat$transformed) / length(night.stat$transformed)^(1/3)
+
+ggplot(night.stat, aes(x = transformed)) +
+  geom_histogram(bins = 1000000000, color = "black", fill = "skyblue") +
+  labs(title = "Histogram",
+       x = "Variance",
+       y = "Frequency")
+```
+
+
+##### Daytime 
+First establish a daytime subset. 
+```{r, Daytime Period}
+start_obs <- ymd_hms("2024-05-01 5:40:00")
+end_obs <- ymd_hms("2024-05-01 18:46:00")
+
+daytime <- subset(t918.may, dt >= start_obs & dt <= end_obs)
+```
+```
+
+Then rinse and repeat the process from the night data. 
+```{r}
+daytime.stat <- intervalAnalysis(daytime,
+                              slope,
+                              "z_avg",
+                              windowLength=40, 
+                              windowStep=1)
+
+
+daytime.slope <- daytime.stat %>% 
+  rename(dt = timestamp, slope = stat)
+
+daytime.stat <- intervalAnalysis(daytime.slope,
+                              var,
+                              "slope",
+                            windowLength=40,
+                              windowStep=1)
+
+```
+
+```{r}
+ggplot(daytime.stat, aes(x=timestamp)) +
+geom_hist(aes(y=stat))
+
+```
+

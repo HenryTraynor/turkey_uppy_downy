@@ -1,0 +1,160 @@
+---
+title: "Turkey Functions"
+author: "Austin Acree; Henry Traynor; Mike Nolan-Tamariz"
+date: "2024-11-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Collections of functions implemented throughout this project
+
+
+#### Henry's intervalAnalysis
+Developed to different statistics for data smoothing
+
+```{r}
+intervalAnalysis <- function(df.sample, fun.call, dataCol, windowLength, windowStep) {
+  colNum = which(colnames(df.sample)==dataCol)
+  #calculation of statistic values
+  stat <- rollapply(df.sample[,colNum],
+                    FUN=fun.call,
+                    width=windowLength,
+                    by = windowStep,
+                    by.column = TRUE,
+                    align = "right")
+  
+  timestamp <- seq(from=df.sample$dt[windowLength], to=df.sample$dt[nrow(df.sample)], length.out=length(stat))
+  #combining stat values with time indices
+  df.stat <- data.frame(timestamp,stat)
+  
+  return(df.stat)
+}
+
+```
+
+#### shrink
+Subset smaller data ranges; copy paste into code to set date range
+Applied to raw MoveBank csv
+
+```{r}
+shrink <- function (data) {
+  start_date <- ymd_hms("2024-02-26 05:16:00")
+  end_date <- ymd_hms("2024-05-15 12:00:00")
+  
+  data <- subset(data, timestamp >= start_date & timestamp <= end_date)
+  return(x)}
+```
+
+#### retime
+Sets new dates and times for processing through the given code. Sets time/date as POSITXct items. 
+
+```{r}
+retime <- function(data) {
+  data$Month = format(as.POSIXct(data$timestamp), '%m')
+  data$Day = format(as.POSIXct(data$timestamp), '%d')
+  data$Year = format(as.POSIXct(data$timestamp), '%Y')
+  data$Date = format(as.POSIXct(data$timestamp), '%Y-%m-%d')
+  data$Time = format(as.POSIXct(data$timestamp), '%H:%M:%S')
+  return(data)}
+
+```
+
+#### reName
+Sets simplified columns name (from raw MoveBank csv). Needed for original code string. 
+Capitalize 'N' to distinguish from base dplyr function
+```{r}
+reName <- function (dataframe) {
+  dataframe <-dataframe %>% 
+    rename(ID="individual-local-identifier", accel=`eobs:accelerations-raw`)
+  return(dataframe)
+}
+```
+
+#### expandAccel
+To separate acceleration values. Pulled from original code.
+
+```{r}
+expandAccel <- function (data) {
+  
+  # Function to split 'accel' column into groups of three values (x, y, z axes)
+  split_accel_data <- function(accel_col) {
+    accel_values <- unlist(strsplit(accel_col, " "))
+    matrix(accel_values, ncol = 3, byrow = TRUE)
+  }
+  
+  # Initialize an empty dataframe to store the expanded data
+  expanded_data <- data.frame()
+  
+  # Iterate through each row in the dataframe
+  for (i in 1:nrow(data)) {
+    # Split accel column into x, y, z values
+    accel_matrix <- split_accel_data(data$accel[i])
+    
+    # Create a temporary dataframe for the current row, repeating the timestamp, date, year, and tag-local-identifier for each sample
+    temp_data <- data.frame(
+      Time = rep(data$Time[i], nrow(accel_matrix)),
+      Date = rep(data$Date[i], nrow(accel_matrix)),
+      Year = rep(data$Year[i], nrow(accel_matrix)),
+      ID = rep(data$ID[i], nrow(accel_matrix)),
+      sample_num = 1:nrow(accel_matrix),  # Add a sample number for each sample
+      x_axis = accel_matrix[, 1],
+      y_axis = accel_matrix[, 2],
+      z_axis = accel_matrix[, 3]
+    )
+    
+    # Append the temporary dataframe to the expanded dataframe
+    expanded_data <- rbind(expanded_data, temp_data)
+  }
+  expanded_data$x_axis=as.numeric(expanded_data$x_axis)
+  expanded_data$y_axis=as.numeric(expanded_data$y_axis)
+  expanded_data$z_axis=as.numeric(expanded_data$z_axis)
+  
+  
+  return(expanded_data)
+}
+```
+
+#### simplify
+Pulled from Henry's code to simplify the datframe. I have not, however troubleshot this yet. 
+
+```{r}
+simplify <- function (dataframe) {
+  smaller.df <- dataframe %>%
+  select("ID", "dt", "x_avg", "y_avg", "z_avg")
+  return(smaller.df)
+}
+```
+
+#### condenseBurst
+Takes the average of values on an accel axis per burst.
+This could probably be expanded to apply across all three axes at once, but has to be applied individually for now. 
+
+```{r}
+condense_burst <- function(column, window_size = 40) {
+  sapply(seq_along(column), function(i) {
+    start <- floor((i - 1) / window_size) * window_size + 1
+    end <- min(start + window_size - 1, length(column))
+    mean(column[start:end])
+  })
+}
+```
+
+#### create "dt" column
+This could probably get integrated into the "retime" function, so long as it does not get lost in the expandAccel function later. Could also get worked into another function such as "simplify".
+
+```{r}
+create.dt <- function (df) { 
+  df$DateTime = paste(df$Date, df$Time)
+df$dt = ymd_hms(df$DateTime, tz="GMT")
+df$dt = df$dt - hours(5)
+return(df)
+}
+
+createdt <- function (dataframe) {
+dataframe$DateTime = paste(dataframe$Date, dataframe$Time)
+dataframe$DT = ymd_hms(dataframe$DateTime,tz="GMT")
+}
+```
+

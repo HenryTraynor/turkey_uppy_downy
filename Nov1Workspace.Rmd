@@ -1,0 +1,74 @@
+---
+title: "Simplified Analysis"
+author: "Austin Acree"
+date: "2024-11-01"
+output: html_document
+---
+##### Notes
+Here is what I developed as my base workflow for exploring data. I cut the messy end analysis off, and just ket this front matter. Broke one of dataframes initially, so I reran w/13921. Should be pretty easy to "find and replace" to put in whichever you want (just make sure to skip the first one where the files are uploaded). t918 is the individual Mike manually keyed out. 
+
+Cheers!
+
+### Call Libraries and Files
+
+```{r message=FALSE}  
+library(tidyverse)
+require(readr)
+library(ggplot2)
+library(dplyr)
+library(goeveg)
+library(zoo)
+library(moments)
+
+t921 <- read_csv("C:/Users/austi/Desktop/TurkeyProj/data/13921.csv")
+t920 <- read_csv("C:/Users/austi/Desktop/TurkeyProj/data/13920.csv")
+t919 <- read_csv("C:/Users/austi/Desktop/TurkeyProj/data/13919.csv")
+t918 <- read_csv("C:/Users/austi/Desktop/TurkeyProj/data/13918.csv")
+t917 <- read_csv("C:/Users/austi/Desktop/TurkeyProj/data/13917.csv")
+t11197 <- read_csv("C:/Users/austi/Desktop/TurkeyProj/data/13917.csv")
+```
+Probably just focusing on 918 for now.
+
+#### Prep DF for analysis
+
+```{r message=FALSE}
+retime(t921) -> t921
+reName(t921) -> t921 
+expandAccel(t921) -> t921
+
+```
+
+#### Axis averages
+```{r}
+t921 <- t921%>%
+  mutate(x_avg=condense_burst(x_axis))
+t921 <- t921%>%
+  mutate(y_avg=condense_burst(y_axis))
+t921 <- t921%>%
+  mutate(z_avg=condense_burst(z_axis))
+
+
+create.dt(t921) -> t921
+simplify(t921)-> t921
+```
+
+#### Analysis, change window and statistic here
+```{r}
+df.stat <- intervalAnalysis(t921, "STATISTIC", "z_avg", 15, 1)
+```
+
+
+#### Visualize
+```{r}
+ggplot(df.stat, aes(x=timestamp)) +
+  geom_line(aes(y=stat), color = 'skyblue3') +
+  xlab("Statistic of Interest") + ylab("Time")
+```
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
