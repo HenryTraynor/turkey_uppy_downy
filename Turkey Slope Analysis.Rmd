@@ -1,0 +1,400 @@
+---
+title: "TurkeySlopeAnalysis"
+author: "Austin Acree"
+date: "2024-11-21"
+output: html_document
+---
+## Libraries and Files
+```{r message=FALSE, warning=FALSE}
+library(tseries)
+library(tidyverse)
+require(readr)
+library(ggplot2)
+library(dplyr)
+require(goeveg)
+library(zoo)
+require(moments)
+
+t921 <- read_csv("C:/Users/aa04991/Desktop/TurkeyProj/data/13921.csv")
+t920 <- read_csv("C:/Users/aa04991/Desktop/TurkeyProj/data/13920.csv")
+t919 <- read_csv("C:/Users/aa04991/Desktop/TurkeyProj/data/13919.csv")
+t918 <- read_csv("C:/Users/aa04991/Desktop/TurkeyProj/data/13918.csv")
+t917 <- read_csv("C:/Users/aa04991/Desktop/TurkeyProj/data/13917.csv")
+t11197 <- read_csv("C:/Users/aa04991/Desktop/TurkeyProj/data/13917.csv")
+```
+
+## Preprocess Data Frames
+All base functions are in the "Turkey Functions" file. 
+
+Edit this "shrink" function to select for the desired date range. 
+```{r}
+shrink <- function (data) {
+  start_date <- ymd_hms("2024-05-01 03:10:00")
+  end_date <- ymd_hms("2024-05-30 12:00:00")
+  
+  x <- subset(data, timestamp >= start_date & timestamp <= end_date)
+  return(x)
+}
+```
+
+This then complies all the functions needed before processing through the expand accel.
+```{r}
+adjust = function (df) {
+  adjusteddf <- retime(df)
+  adjusteddf <- reName(adjusteddf)
+  adjusteddf <- shrink(adjusteddf)
+  return(adjusteddf)
+}
+```
+```{r}
+adjust(t918) -> t918.may
+adjust(t917) -> t917.may
+#adjust(t919) -> t919.may
+#adjust(t920) -> t920.may
+#adjust(t921) -> t921.may
+```
+
+## Get columns of interest
+This separates the collected acceleration data and creates a single accel value for each collection burst. I first created a compiled function.
+```{r}
+expand = function(df) {
+  expandAccel(df) -> df
+  df <- df%>%
+  mutate(x_avg=condense_burst(x_axis))
+  df <- df%>%
+  mutate(y_avg=condense_burst(y_axis))
+  df <- df%>%
+  mutate(z_avg=condense_burst(z_axis))
+  create.dt(df) -> df
+  simplify(df)-> df
+  return(df)
+}
+```
+
+Then feed each df through the function. 
+```{r}
+expand(t918.may) -> t918.may
+expand(t917.may) -> t917.may
+```
+
+## Manipulating data
+### t918
+```{r}
+start_obs <- ymd_hms("2024-05-01 00:00:00")
+end_obs <- ymd_hms("2024-05-01 23:59:59")
+
+day1 <- subset(t918.may, dt >= start_obs & dt <= end_obs)
+```
+
+#### Single day
+
+Start by picking out a day. We will then apply the slope analysis function, followed by a behaviour check, then the variance function to see what the data looks like after being fed through these. The variance and slope analysis will be saved to different objects for later recall. 
+
+```{r, 1 Day of data}
+start_obs <- ymd_hms("2024-05-01 00:00:00")
+end_obs <- ymd_hms("2024-05-01 23:59:59")
+
+day1 <- subset(t918.may, dt >= start_obs & dt <= end_obs)
+```
+
+
+```{r, Find slope between points}
+day1.stat <- intervalAnalysis(day1,
+                              slope,
+                              "z_avg",
+                              windowLength=40, 
+                              windowStep=1)
+```
+Note: 'day1.stat' is a temporary object that will be overwritten. 
+
+```{r, Behaviour check}
+ggplot(day1.stat, aes(x=timestamp)) +
+  geom_line(aes(y=stat), color = 'skyblue3') +
+  ylab("Statistic of Interest") + xlab("Time") +
+  scale_y_continuous(limits = c(0,5)) +
+  geom_vline(xintercept = as.numeric(manual.918z[1:8]), 
+             color = "royalblue", linetype = "dashed", linewidth = 1)
+```
+This includes y limits to "zoom" and better understand the noise at low values.
+```{r, Define day1.slope object}
+day1.slope <- day1.stat %>% 
+  rename(dt = timestamp, slope = stat)
+```
+
+```{r, Find the variance in slope}
+day1.stat <- intervalAnalysis(day1.slope,
+                              var,
+                              "slope",
+                              windowLength=80, 
+                              windowStep=1)
+```
+
+
+#### Whole month
+```{r}
+t918.out <- intervalAnalysis(t918.may,
+                              slope,
+                              "z_avg",
+                              windowLength=25, 
+                              windowStep=2)
+```
+Rename columns once shown to behave correctly. 
+```{r}
+t918.out <- t918.out %>% 
+  rename(dt = timestamp, slope = stat)
+```
+
+
+#### Variance
+Then the variance thereof
+```{r}
+t918.out <- intervalAnalysis(t918.out,
+                              var,
+                              "slope",
+                             windowLength=25, 
+                              windowStep=1)
+```
+
+
+Here is a graph to check the behaviour quickly.
+```{r}
+ggplot(t918.out, aes(x=timestamp)) +
+  geom_line(aes(y=stat), color = 'skyblue3') +
+  ylab("Statistic of Interest") + xlab("Time") +
+  scale_y_continuous(limits = c(0,2))
+```
+
+
+#### Insert Mike's manual dates
+```{r}
+read.csv("C:/Users/aa04991/Desktop/TurkeyProj/13918_manual_z.csv") -> manual_918z
+
+reform.manual <- function (df) { 
+  mixDown= paste(df$Date, df$Down)
+  mixUp = paste(df$Date, df$Up)
+  Down = (ymd_hms(mixDown, tz="GMT"))- hours(5)
+  Up = (ymd_hms(mixUp, tz="GMT"))- hours(5)
+  return(c(Down, Up))
+}
+
+reform.manual(manual_918z) -> manual.918z
+```
+
+### Visualize 
+#### 1 Month; 1 indv.
+Using #918
+A couple days with manual dates inserted for a check
+
+###### Define less days
+```{r}
+start_obs <- ymd_hms("2024-05-01 00:00:00")
+end_obs <- ymd_hms("2024-05-03 23:59:00")
+
+less.days.918 <- subset(t918.may, dt >= start_obs & dt <= end_obs)
+
+manipulated.subset <- intervalAnalysis(less.days.918,
+                              slope,
+                              "z_avg",
+                              windowLength=25, 
+                              windowStep=2)
+
+```
+
+```{r}
+manipulated.subset <- manipulated.subset %>% 
+  rename(dt = timestamp, slope = stat)
+
+manipulated.subset <- intervalAnalysis(manipulated.subset,
+                              var,
+                              "slope",
+                              windowLength=25, 
+                              windowStep=1)
+```
+
+```{r}
+ggplot(manipulated.subset, aes(x=timestamp)) +
+  geom_line(aes(y=stat), color = 'skyblue3') +
+  ylab("Statistic of Interest") + xlab("Time") +
+  geom_vline(xintercept = as.numeric(manual.918z[1:8]), 
+             color = "royalblue", linetype = "dashed", linewidth = 1) +
+  scale_y_continuous(limits = c(0,2))
+```
+
+#### Whole month with no dates.
+```{r}
+ggplot(manipulated.subset, aes(x=timestamp)) +
+  geom_line(aes(y=stat), color = 'skyblue3') +
+  ylab("Statistic of Interest") + xlab("Time")
+```
+
+
+#### Threshold and dates
+Now we pick a threshold and add the manual dates. Here I have continued with the quantile threshold. 
+```{r}
+manipulated.subset <- manipulated.subset %>% 
+  rename(dt = timestamp, slope = stat)
+
+manipulated.subset <- intervalAnalysis(manipulated.subset,
+                              var,
+                              "slope",
+                              windowLength=10, 
+                              windowStep=1)
+```
+
+```{r}
+ggplot(less.days.918, aes(x=timestamp)) +
+  geom_line(aes(y=stat), color = 'skyblue3') +
+  ylab("Statistic of Interest") + xlab("Time")+
+  geom_vline(xintercept = as.numeric(manual.918z[1:8]), 
+             color = "royalblue", linetype = "dashed", linewidth = 1) +
+  geom_hline(yintercept =quantile(less.days.918$stat,0.62)) +
+  scale_y_continuous(limits = c(0,5))
+```
+
+### Extrapolate awake/asleep values
+```{r}
+
+```
+
+#### Subset Testing for good results
+When the change in accel is higher than $x$ and preceeded by a period of low velocity, return timecode.
+Consider, when the variance between point a and point b is high, look for period of low values
+
+```{r, Plot base Z-Avg}
+ggplot(less.days.918, aes(x=dt)) +
+  geom_line(aes(y=z_avg), color = 'skyblue3')
+```
+  
+```{r, Apply Slope Smoothing}
+subset.test <- intervalAnalysis(less.days.918,
+                              slope,
+                              "z_avg",
+                              windowLength=25, 
+                              windowStep=2)
+
+subset.test <- subset.test %>% 
+  rename(dt = timestamp, slope = stat)
+```
+
+```{r, Plot slope zoomed}
+ggplot(subset.test, aes(x=dt)) +
+  geom_line(aes(y=slope), color = 'skyblue3') +
+  scale_y_continuous(limits = c(0,5)) + 
+  geom_hline(yintercept= quantile(subset.test$slope, 0.85))
+```
+These are "zoomed" to better pick thresholds
+
+```{r, Subset variance for threshold picking}
+subsetvar <- intervalAnalysis(subset.test,
+                              var,
+                              "slope",
+                              windowLength=25, 
+                              windowStep=1)
+
+ggplot(subsetvar, aes(x=timestamp)) +
+  geom_line(aes(y=stat), color = 'skyblue3') +
+  scale_y_continuous(limits = c(0,5)) + 
+  geom_hline(yintercept= quantile(subsetvar$stat, 0.85)) +
+  geom_vline(xintercept = (manual.918z[1:8]), 
+             color = "royalblue", linetype = "dashed", linewidth = 1) +
+  scale_y_continuous(limits = c(0,2))
+
+```
+
+
+#### Return T/F values
+The second smoothing/application of variance is applied in these functions.  
+
+```{r, Original uses mix slope/variance}
+check.variance <- function(y, threshold, value, previous.count) {
+  result <- logical(length(y))
+  for (i in ((previous.count + 1):length(y))) {
+    if (var(y[i-1:i]) > threshold &&
+        all(-value < mean(y[(i-previous.count):i]) & mean(y[(i-previous.count):i]) < value)){
+      result[i] <- TRUE
+    } else {
+      result[i] <- FALSE
+    }
+  }
+  return(result)
+}
+
+threshold <- 1.72 
+value <- 0.00
+previous.count <- 5  
+
+variance.check <-as.data.frame(check.variance(subset.test$slope, threshold, value, previous.count))
+
+rename(variance.check, status=1) -> variance.check
+status.918 <- cbind(subset.test, variance.check)
+
+ggplot(status.918, aes(x=dt)) +
+  geom_point(aes(y=status), color = 'skyblue3') +
+  geom_vline(xintercept = (manual.918z[1:8]), 
+             color = "royalblue", linetype = "dashed", linewidth = 1) 
+
+```
+
+
+```{r, var(values) uses all variance numbers}
+check.variance2 <- function(values, threshold, previous.count, value) {
+  result <- logical(length(values))
+  for (i in ((previous.count + 1):length(values))) {
+    if (var(values[i-1:i]) > threshold &&
+        all(mean(var(values[(i-previous.count):i])) < value)){
+      result[i] <- TRUE
+    } else {
+      result[i] <- FALSE
+    }
+  }
+  return(result)
+}
+
+threshold <- 1.5
+high.value <- 0.25
+previous.count <- 40
+
+variance.check <-as.data.frame(check.variance2(subset.test$slope, threshold, previous.count, high.value))
+
+plot(variance.check)
+```
+
+##### With third condition
+```{r, With a third variable}
+check.variance3 <- function(values, threshold, previous.count, day, night) {
+  result <- logical(length(values))
+
+  for (i in seq(previous.count + 1, length(values))) {
+    if (i <= length(values) - previous.count) {  
+      subset1 <- values[(i - previous.count):i]
+      subset2 <- values[i:(i + previous.count)]
+
+      
+      if (!any(is.na(subset1)) && !any(is.na(subset2))) {
+        if (var(values[i-1:i]) > threshold &&
+            mean(var(subset1)) < night &&
+            mean(var(subset2)) > day) {
+          result[i] <- TRUE
+        } else {
+          result[i] <- FALSE
+        }
+      } else {
+        result[i] <- FALSE
+      }
+    } else {
+      result[i] <- FALSE
+    }
+  }
+  return(result)
+}
+
+threshold <- 0.5
+high.value <- 0.2
+previous.count <- 50
+
+variance.check <-as.data.frame(check.variance3(day1.slope$slope, threshold, previous.count, high.value))
+
+plot(variance.check)
+```
+
+
