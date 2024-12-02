@@ -226,26 +226,18 @@ var_avg_slope <- intervalAnalysis(avg_slope,
                              windowLength=10,
                              windowStep=1)
 
-ggplot(data=var_avg_slope, aes(x=timestamp, y=stat)) + geom_line() + ylab("SD Average Slope") + xlab("Time") +
-  geom_hline(yintercept=7)
+ggplot(data=var_avg_slope, aes(x=timestamp, y=stat)) + geom_line() + ylab("Variance of Average Slope") + xlab("Time") +
+  geom_hline(yintercept=7, color="red")
 
 colnames(var_avg_slope) <- c("dt", "stat")
 
-sd_var_avg_slope <- intervalAnalysis(var_avg_slope,
-                                     sd,
-                                     "stat",
-                                     windowLength=10,
-                                     windowStep=1)
-colnames(sd_var_avg_slope) <- c("dt", "stat")
-
-ggplot(data=sd_var_avg_slope, aes(x=dt, y=stat)) + geom_line() + geom_hline(yintercept=2.0)
 ```
 
 
 ```{r Thresholds}
 library(dplyr)
 
-c <-  7.0 #medianCalc(var_avg_slope$stat,propDaylight1)  #threshold value (critical value)
+c <-  6.0 #medianCalc(var_avg_slope$stat,propDaylight1)  #threshold value (critical value)
 
 colnames(var_avg_slope) <- c("dt", "stat")
 
@@ -254,17 +246,42 @@ var_avg_slope$day <- temp$dt
 
 var_avg_slope$distC <- var_avg_slope$stat-c
 
-zero_dist <- vector("numeric")
+day1 <- var_avg_slope[var_avg_slope$day=="2023-03-01",]
+day2 <- var_avg_slope[var_avg_slope$day=="2023-03-02",]
 
-for(i in 1:(length(var_avg_slope$distC)-1)) {
-  if(var_avg_slope$distC[i]<0 & var_avg_slope$distC[i+1]>0) {
-    zero_dist <- rbind(zero_dist, c(i))
+zero_dist1 <- vector("numeric")
+zero_dist2 <- vector("numeric")
+
+for(i in 1:(length(day1$distC)-1)) {
+  if(day1$distC[i]<0 & day1$distC[i+1]>0) {
+    zero_dist1 <- rbind(zero_dist1, c(i))
+  }
+  if(day1$distC[i]>0 & day1$distC[i+1]<0) {
+    zero_dist1 <- rbind(zero_dist1, c(i))
   }
 }
 
-var_avg_slope$dt[zero_dist[1]]
-var_avg_slope$dt[zero_dist[length(zero_dist)]]
+for(i in 1:(length(day2$distC)-1)) {
+  if(day2$distC[i]<0 & day2$distC[i+1]>0) {
+    zero_dist2 <- rbind(zero_dist2, c(i))
+  }
+  if(day2$distC[i]>0 & day2$distC[i+1]<0) {
+    zero_dist2 <- rbind(zero_dist2, c(i))
+  }
+}
 
-ggplot(data=var_avg_slope, aes(x=dt, y=stat)) + geom_line() + ylab("SD Average Slope") + xlab("Time") + geom_vline(xintercept=var_avg_slope$dt[zero_dist[1]])
+day1$dt[zero_dist1[1]]
+day1$dt[zero_dist1[length(zero_dist1)]]
+
+day2$dt[zero_dist2[2]]
+day2$dt[zero_dist2[length(zero_dist2)]]
+
+ggplot(data=var_avg_slope, aes(x=dt, y=stat)) + geom_line() + ylab("SD Average Slope") + xlab("Time") +
+  geom_vline(xintercept=day1$dt[zero_dist1[1]],color="blue") +
+  geom_vline(xintercept=day1$dt[zero_dist1[length(zero_dist1)]],color="blue") +
+  geom_vline(xintercept=day2$dt[zero_dist2[2]],color="blue") +
+  geom_vline(xintercept=day2$dt[zero_dist2[length(zero_dist2)]],color="blue") +
+  geom_hline(yintercept = c, color="red", linetype="dashed")
+  
 
 ```

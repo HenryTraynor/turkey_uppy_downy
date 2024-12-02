@@ -1,0 +1,246 @@
+---
+title: "Untitled"
+author: "Henry Traynor"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Read in Data}
+# 2 Weeks starting 2024-05-01, ID 13917
+require(readr)
+df <- read_csv("Data/13917.csv")
+```
+
+```{r}
+retime <- function(data) {
+  data$Month = format(as.POSIXct(data$timestamp), '%m')
+  data$Day = format(as.POSIXct(data$timestamp), '%d')
+  data$Year = format(as.POSIXct(data$timestamp), '%Y')
+  data$Date = format(as.POSIXct(data$timestamp), '%Y-%m-%d')
+  data$Time = format(as.POSIXct(data$timestamp), '%H:%M:%S')
+  return(data)
+}
+
+df <- retime(df)
+```
+
+#### reName
+Sets simplified columns name (from raw MoveBank csv). Needed for original code string. 
+Capitalize 'N' to distinguish from base dplyr function
+```{r}
+#library(dplyr)
+#library(plyr)
+#reName <- function (dataframe) {
+#  dataframe <-dataframe %>% 
+#    rename(ID="individual-local-identifier", accel=`eobs:accelerations-raw`)
+#  return(dataframe)
+#}
+
+colnames(df)[colnames(df)=="individual-local-identifier"] = "ID"
+
+colnames(df)[colnames(df)=="eobs:accelerations-raw"] = "accel"
+```
+
+#### expandAccel
+To separate acceleration values. Pulled from original code.
+
+```{r}
+expandAccel <- function(data) {
+  # Function to split 'accel' column into groups of three values (x, y, z axes)
+  split_accel_data <- function(accel_col) {
+    accel_values <- unlist(strsplit(accel_col, " "))
+    matrix(accel_values, ncol = 3, byrow = TRUE)
+  }
+  # Initialize an empty dataframe to store the expanded data
+  expanded_data <- data.frame()
+  # Iterate through each row in the dataframe
+  for (i in 1:nrow(data)) {
+    # Split accel column into x, y, z values
+    accel_matrix <- split_accel_data(data$accel[i])
+    # Create a temporary dataframe for the current row, repeating the timestamp, date, year, and tag-local-identifier for each sample
+    temp_data <- data.frame(
+      Time = rep(data$Time[i], nrow(accel_matrix)),
+      Date = rep(data$Date[i], nrow(accel_matrix)),
+      Year = rep(data$Year[i], nrow(accel_matrix)),
+      ID = rep(data$ID[i], nrow(accel_matrix)),
+      sample_num = 1:nrow(accel_matrix),  # Add a sample number for each sample
+      x_axis = accel_matrix[, 1],
+      y_axis = accel_matrix[, 2],
+      z_axis = accel_matrix[, 3]
+    )
+    # Append the temporary dataframe to the expanded dataframe
+    expanded_data <- rbind(expanded_data, temp_data)
+  }
+  expanded_data$x_axis=as.numeric(expanded_data$x_axis)
+  expanded_data$y_axis=as.numeric(expanded_data$y_axis)
+  expanded_data$z_axis=as.numeric(expanded_data$z_axis)
+  return(expanded_data)
+}
+
+df <- expandAccel(df)
+```
+
+```{r VeDBA Calculation}
+#Rename expanded_df
+
+library(zoo)
+library(plyr)
+library(data.table)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+#Calculate rolling mean of acc for DBA calculation
+window_length=40
+df$x_mean=append(rollmean(df$x_axis, window_length, align="left"), replicate(window_length-1, NA))
+df$y_mean=append(rollmean(df$y_axis, window_length, align="left"), replicate(window_length-1, NA))
+df$z_mean=append(rollmean(df$z_axis, window_length, align="left"), replicate(window_length-1, NA))
+
+#Concatenate Times
+df$DateTime = paste(df$Date, df$Time)
+df$dt = ymd_hms(df$DateTime, tz="GMT")
+df$dt = df$dt - hours(5)
+
+temp <- df %>% mutate(across(dt, ~ as.Date(., format("%m/%d/%Y"), tz="GMT")))
+df$day <- temp$dt
+
+```
+
+```{r Averaging Raw Values}
+#Pull out raw values and average over each recorded burst
+
+df.raw <- data.frame(
+  ID = df$ID,
+  x_axis = df$x_axis,
+  y_axis = df$y_axis,
+  z_axis = df$z_axis,
+  dt = df$dt,
+  day = df$day
+  
+)
+
+condense_burst <- function(column, window_size = 40) {
+  sapply(seq_along(column), function(i) {
+    start <- floor((i - 1) / window_size) * window_size + 1
+    end <- min(start + window_size - 1, length(column))
+    mean(column[start:end])
+  })
+}
+
+df.raw=df.raw%>%
+  mutate(x_avg=condense_burst(x_axis))
+df.raw=df.raw%>%
+  mutate(y_avg=condense_burst(y_axis))
+df.raw=df.raw%>%
+  mutate(z_avg=condense_burst(z_axis))
+
+df.raw <- df.raw %>% distinct(dt, .keep_all=TRUE)
+df.avg <- df.raw %>%
+  select("ID", "dt", "x_avg", "y_avg", "z_avg", "day")
+
+ggplot(data=df.avg, aes(x=dt, y=z_avg)) + geom_line()
+```
+
+```{r Avg. Slope}
+library(zoo)
+library(moments)
+
+intervalAnalysis <- function(df.sample, fun.call, dataCol, windowLength, windowStep) {
+  colNum = which(colnames(df.sample)==dataCol)
+  #calculation of statistic values
+  stat <- rollapply(df.sample[,colNum],
+                      FUN=fun.call,
+                      width=windowLength,
+                      by=windowStep,
+                      by.column = TRUE,
+                      align = "left")
+  timestamp <- seq(from=df.sample$dt[1], to=df.sample$dt[nrow(df.sample)-windowLength], length.out=length(stat))
+  #combining stat values with time indices
+  df.stat <- data.frame(timestamp,stat)
+  
+  return(df.stat)
+}
+
+avg_day_list <- list()
+
+for(d in unique(df.avg$day)) {
+  date=format(as.Date(d,origin="1970-01-01"))
+  temp <- df.avg[df.avg$day==date,]
+  avg_day_list <- append(avg_day_list, list(temp))
+}
+
+smooth_avg_day_list <- list()
+
+for(i in 1:length(avg_day_list)) {
+  smooth_avg_day_list <- append(smooth_avg_day_list,
+                                list(intervalAnalysis(
+                                  avg_day_list[[i]],
+                                  "mean",
+                                  "z_avg",
+                                  20,
+                                  1
+                                )))
+}
+
+for(i in 1:length(smooth_avg_day_list)) {
+  colnames(smooth_avg_day_list[[i]]) <- c("dt", "stat")
+}
+
+avgSlope <- function(x) {
+  return((x[length(x)] - x[1]) / length(x))
+}
+
+slope_smooth_avg_day_list <- list()
+
+for(i in 1:length(smooth_avg_day_list)) {
+  slope_smooth_avg_day_list <- append(slope_smooth_avg_day_list,
+                                      list(intervalAnalysis(
+                                        smooth_avg_day_list[[i]],
+                                        avgSlope,
+                                        "stat",
+                                        15,
+                                        2
+                                      )))
+}
+
+for(i in 1:length(slope_smooth_avg_day_list)) {
+  colnames(slope_smooth_avg_day_list[[i]]) <- c("dt", "stat")
+}
+
+var_slope_smooth_avg_day_list <- list()
+
+for(i in 1:length(slope_smooth_avg_day_list)) {
+  var_slope_smooth_avg_day_list <- append(var_slope_smooth_avg_day_list,
+                                      list(intervalAnalysis(
+                                        slope_smooth_avg_day_list[[i]],
+                                        "var",
+                                        "stat",
+                                        10,
+                                        1
+                                      )))
+}
+
+for(i in 1:length(var_slope_smooth_avg_day_list)) {
+  colnames(var_slope_smooth_avg_day_list[[i]]) <- c("dt", "stat")
+}
+
+ggplot(avg_day_list[[3]], aes(x=dt, y=z_avg)) +geom_line()
+
+```
+
+```{r Variance of Avg. Slope}
+df_var_avg_slope <- intervalAnalysis(df_avg_slope,
+                             var,
+                             "stat",
+                             windowLength=10,
+                             windowStep=3)
+
+colnames(df_var_avg_slope) <- c("dt", "stat")
+
+ggplot(data=df_var_avg_slope, aes(x=dt, y=stat)) + geom_line() + ylab("Variance Average Slope") + xlab("Time") #+
+  #geom_hline(yintercept=7)
+
+```
